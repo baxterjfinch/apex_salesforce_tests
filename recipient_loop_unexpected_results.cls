@@ -1,0 +1,67 @@
+// This script is supposed to send a unique envelope for every contact
+// associated with a particular Opportunity.
+
+// It successfully grabs the users from the opp and adds them as Recipients
+// to an envelope but the envelope is only sent to the last user in the list
+// as well as the account owner (I dont understand why this is happening)
+
+
+List<Contact> myContacts = new List<Contact>();
+List<dfsle.Recipient> myRecipients = new List<dfsle.Recipient>();
+List<OpportunityContactRole> oppContactRoles = [SELECT ContactId FROM OpportunityContactRole WHERE OpportunityId = '0064P00000lh9pVQAQ'];
+
+for (OpportunityContactRole contactRole : oppContactRoles) {
+    //
+    // Takes each OpportunityContactRole, obtains their Email, creates a Recipient object, and adds to List of Recipients
+    //
+    try {
+        Contact contact = [SELECT Name, Email, Id FROM Contact WHERE Id = :contactRole.ContactId];
+		dfsle.Recipient myRecipient = dfsle.Recipient.fromSource(
+            contact.Name,
+            contact.Email,
+            null,
+            'Signer 1',
+            new dfsle.Entity(contact.Id)
+        );
+
+        // Adds Recipient to list
+        myRecipients.add(myRecipient);
+
+    }
+    catch (Exception ex) {
+    	system.debug(ex.getMessage());
+    }
+}
+
+// Cycle through list of Recipients and create an Envelope for each
+
+for (dfsle.Recipient myRecipient: myRecipients) {
+    try {
+        //Build Envelope
+        dfsle.Envelope myEnvelope = dfsle.EnvelopeService.getEmptyEnvelope(
+            new dfsle.Entity('entity'));
+
+        // Add Single Recipient
+        myEnvelope = myEnvelope.withRecipients(new List<dfsle.Recipient> { myRecipient });
+
+        //create a new document for the Envelope with Template
+        dfsle.UUID myTemplateId = dfsle.UUID.parse('f7e51f35-a2fd-4918-8920-ce5e6306b013');
+        dfsle.Document myDocument = dfsle.Document.fromTemplate(
+            myTemplateId, // templateId in dfsle.UUID format
+            'myTemplate'); // name of the template
+
+        //Apply Documents To Envelope
+        myEnvelope = myEnvelope.withDocuments(new List<dfsle.Document> { myDocument });
+
+        //Customize subject and email body
+        myEnvelope = myEnvelope.withEmail('subject', 'email body');
+
+        //Send
+        myEnvelope = dfsle.EnvelopeService.sendEnvelope(
+            myEnvelope, // The envelope to send
+            true); // Send now?
+    }
+    catch (Exception ex) {
+    	system.debug(ex.getMessage());
+    }
+}

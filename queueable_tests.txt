@@ -1,0 +1,71 @@
+Id myGroupId; // A Chatter group ID
+// Build list membership from a Chatter group.
+// Recipient authentication, email settings, or private notes may be overridden using the Recipient.with* methods.
+// Envelope email settings and notifications may also be overridden per copy using the Envelope.with* methods.
+List<dfsle.Envelope> myBulkCopies = new List<dfsle.Envelope>();
+List<OpportunityContactRole> oppContactRoles = [SELECT ContactId FROM OpportunityContactRole WHERE OpportunityId = '0064P00000lh9pVQAQ'];
+
+for (OpportunityContactRole m : [
+	SELECT ContactId FROM OpportunityContactRole
+	WHERE OpportunityId = '0064P00000lh9pVQAQ'
+]) {
+    Contact contact = [SELECT Name, Email, Id FROM Contact WHERE Id = :m.ContactId];
+	myBulkCopies.add(dfsle.Envelope.newBulkCopy(
+		dfsle.Recipient.newBulkRecipient(
+			contact.Name, // Name
+			contact.Email, // Email
+			new dfsle.Entity(contact.Id)))); // Source Salesforce object
+}
+
+// Create the bulk list. This list persists after sending and may be reused for multiple envelopes.
+dfsle.BulkList myList = dfsle.BulkSendService.createLists(new List<dfsle.BulkList> {
+	dfsle.BulkList.newList(
+		'My bulk list', // List name
+		myBulkCopies, // Envelope copies
+		new dfsle.Entity('0064P00000lh9pVQAQ')) // The Salesforce source object
+})[0];
+
+// Save the ID for later operations
+Id myListId = myList.id;
+
+public class SendEnvelopeClass implements Queueable {
+    private dfsle.Envelope draftEnvelope;
+    private Id myListId;
+
+    public SendEnvelopeClass(dfsle.Envelope myEnvelope, Id myListId) {
+        this.draftEnvelope = myEnvelope;
+        this.myListId = myListId;
+    }
+
+    public void execute(QueueableContext context) {
+        dfsle.BulkSendService.sendEnvelope(this.myListId, this.draftEnvelope);
+    }
+}
+
+public class GetDraftClass implements Queueable {
+    private Id myFileId;
+    private Id myListId;
+    public dfsle.Envelope draftEnvelope;
+
+    public GetDraftClass(Id myFileId, Id myListId) {
+        this.myFileId = myFileId;
+        this.myListId = myListId;
+    }
+
+    public void execute(QueueableContext context) {
+        this.draftEnvelope = dfsle.BulkSendService.getDraftEnvelope(
+            dfsle.DocumentService.getDocuments(ContentVersion.getSObjectType(), new Set<Id> { this.myFileId }), // Documents to send
+            null);
+    }
+}
+
+try {
+    GetDraftClass getDraftJob = new GetDraftClass('0684P000008MMyuQAG', myListId);
+    ID jobID = System.enqueueJob(getDraftJob);
+
+    SendEnvelopeClass sendEnvelopeJob = new SendEnvelopeClass(getDraftJob.draftEnvelope, myListId);
+    ID jobID2 = System.enqueueJob(sendEnvelopeJob);
+}
+catch (Exception ex) {
+    system.debug(ex.getMessage());
+}
